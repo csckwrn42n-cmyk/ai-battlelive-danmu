@@ -29,7 +29,7 @@
         .player-row { display: flex; justify-content: space-between; font-size: 13px; }
         .hp-bar-bg { width: 100px; height: 10px; background: #333; border: 1px solid #555; margin-left: 10px; position: relative;}
         .hp-bar-fill { height: 100%; transition: width 0.5s; }
-        .history-feed {
+        .history-feed { max-height: 180px; overflow-y: auto; 
             flex-grow: 1; overflow-y: auto; background: #0d1114; border: 1px solid #222;
             padding: 10px; margin-top: 10px; font-size: 12px; line-height: 1.4; color: #ddd;
         }
@@ -88,11 +88,11 @@
 
     // 固定的 5 个 MBTI 角色状态
     let players = {
-        "A": { id: "A", name: "ESTP", x: 120, y: 150, hp: 100, color: "#ff5555", bubble: "", bTime: 0, targetX: 120, targetY: 150, weapon: "拳头" },
-        "B": { id: "B", name: "INFP", x: 220, y: 250, hp: 100, color: "#5555ff", bubble: "", bTime: 0, targetX: 220, targetY: 250, weapon: "拳头" },
-        "C": { id: "C", name: "INTJ", x: 350, y: 120, hp: 100, color: "#55ff55", bubble: "", bTime: 0, targetX: 350, targetY: 120, weapon: "拳头" },
-        "D": { id: "D", name: "ENFP", x: 420, y: 280, hp: 100, color: "#ffff55", bubble: "", bTime: 0, targetX: 420, targetY: 280, weapon: "拳头" },
-        "E": { id: "E", name: "ISTJ", x: 270, y: 180, hp: 100, color: "#ff55ff", bubble: "", bTime: 0, targetX: 270, targetY: 180, weapon: "拳头" }
+        "ESTP": { id: "ESTP", name: "ESTP", mbti: "企业家", x: 100, y: 120, hp: 100, color: "#ff5555", bubble: "", bTime: 0, targetX: 100, targetY: 120, weapon: "拳头", emoji: "⚡" },
+        "INFP": { id: "INFP", name: "INFP", mbti: "调停者", x: 220, y: 250, hp: 100, color: "#ff8855", bubble: "", bTime: 0, targetX: 220, targetY: 250, weapon: "拳头", emoji: "🌸" },
+        "INTJ": { id: "INTJ", name: "INTJ", mbti: "建筑师", x: 350, y: 120, hp: 100, color: "#5588ff", bubble: "", bTime: 0, targetX: 350, targetY: 120, weapon: "拳头", emoji: "🛡️" },
+        "ENFP": { id: "ENFP", name: "ENFP", mbti: "竞选者", x: 420, y: 280, hp: 100, color: "#88ff55", bubble: "", bTime: 0, targetX: 420, targetY: 280, weapon: "拳头", emoji: "🔥" },
+        "ISTJ": { id: "ISTJ", name: "ISTJ", mbti: "物流师", x: 270, y: 180, hp: 100, color: "#55ffaa", bubble: "", bTime: 0, targetX: 270, targetY: 180, weapon: "拳头", emoji: "📋" }
     };
     
     let particles = [];
@@ -103,7 +103,7 @@
     function parseUserCommand(raw) {
         const txt = raw.trim();
         if (!txt) return null;
-        const match = txt.match(/^([A-E])\s+([a-zA-Z_]+)(?:\s+([A-E]))?$/i);
+        const match = txt.match(/^(ESTP|INFP|INTJ|ENFP|ISTJ)\s+(\S+)(?:\s+(ESTP|INFP|INTJ|ENFP|ISTJ))?$/i) || txt.match(/^([A-E])\s+([a-zA-Z_]+)(?:\s+([A-E]))?$/i);
         if (!match) return null;
         const roleId = match[1].toUpperCase();
         const action = match[2].toLowerCase();
@@ -123,18 +123,17 @@
     }
 
     function submitUserCommand(commandText) {
-        const errorBox = document.getElementById('debugError');
-        const parsed = parseUserCommand(commandText);
-        if (!parsed) {
-            appendHistoryItems(['❌ 指令格式错误，正确写法：A attack D 或 B hide']);
-            errorBox.innerText = '请输入合法指令：角色ID 动作 [目标]';
-            return;
-        }
-        pendingCommands[parsed.roleId] = parsed;
-        appendHistoryItems([`🎤 用户指令：${parsed.roleId} ${parsed.action}${parsed.target ? ' ' + parsed.target : ''}`]);
-        renderPendingCommands();
+        const text = commandText.trim();
+        if(!text) return;
+        appendHistoryItems(['💬 ' + text]);
+        // Send as danmu to server
+        fetch('/danmu', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: text})
+        }).catch(() => {});
         document.getElementById('commandInput').value = '';
-        errorBox.innerText = '✅ 已记录用户指令，本轮将优先执行';
+        document.getElementById('debugError').innerText = '✅ 弹幕已发送，DeepSeek将理解并执行';
     }
 
     function applyCommandOverride(data, id) {
@@ -154,11 +153,15 @@
 
     function appendHistoryItems(lines) {
         if (!lines || lines.length === 0) return;
-        actionHistory = actionHistory.concat(lines.filter(Boolean));
+        // 去重：不添加跟最后一条一样的
+        const filtered = lines.filter(Boolean).filter(l => l !== actionHistory[actionHistory.length-1]);
+        if (filtered.length === 0) return;
+        actionHistory = actionHistory.concat(filtered);
         if (actionHistory.length > 30) actionHistory = actionHistory.slice(-30);
         document.getElementById('actionLog').innerHTML = actionHistory
             .map(line => `<div class="history-item">${line}</div>`)
             .join('');
+        document.getElementById('actionLog').scrollTop = document.getElementById('actionLog').scrollHeight;
     }
 
     function renderWinner(winnerName) {
@@ -174,9 +177,6 @@
         if (pollHandle) {
             clearInterval(pollHandle);
             pollHandle = null;
-    let isLiveMode = false;
-
-    // 初始显示5个角色在地图上
         }
     }
 
@@ -201,14 +201,36 @@
         return result;
     }
 
-    function renderScript(script, isSample = false) {
+    function updateWorldEvent(evt) {
+    if(evt) document.getElementById('worldEvent').innerText = evt;
+}
+function renderScript(script, isSample = false) {
+        if (script.world_event) {
+            updateWorldEvent(script.world_event);
+            appendHistoryItems([`🌍 ${script.world_event}`]);
+        }
+        if (script.narrator) {
+            appendHistoryItems([`📖 ${script.narrator}`]);
+        }
         if (script.world_event) {
             document.getElementById('worldEvent').innerText = script.world_event;
             appendHistoryItems([`🌍 全局大事件：${script.world_event}`]);
         }
 
         const chars = script.characters;
-        if (!chars) return;
+        
+        // 先更新玩家状态（如果有）
+        if(script.players_state) updatePlayerUI(script.players_state);
+        
+        if (!chars) {
+            updateSidebarUI();
+            const alive = Object.values(players).filter(p => p.hp > 0);
+            if (alive.length <= 1) {
+                const w = script.winner;
+                if(w) renderWinner(w + ' 获胜！');
+            }
+            return;
+        }
 
         let currentLogs = [];
         for (let id in chars) {
@@ -255,6 +277,7 @@
             appendHistoryItems(currentLogs);
         }
 
+        if(script.players_state) updatePlayerUI(script.players_state);
         updateSidebarUI();
 
         const alive = Object.values(players).filter(p => p.hp > 0);
@@ -268,26 +291,13 @@
         }
     }
 
-    function initOfflineMode() {
-        document.getElementById('worldEvent').innerText = '⚡ 离线演示模式·等待后端连接';
-        document.getElementById('debugError').innerText = '💡 在PC上运行 python3 brain.py 启用AI驱动';
-        updateSidebarUI();
-    }
-
     async function fetchLatestScript() {
         try {
             const scriptUrl = new URL('game_script.json', window.location.href);
             let response = await fetch(`${scriptUrl.href}?nocache=${Math.random()}`, { cache: 'no-store' });
 
             if (!response.ok) {
-                const sampleUrl = new URL('game_script.sample.json', window.location.href);
-                const sampleResponse = await fetch(`${sampleUrl.href}?nocache=${Math.random()}`, { cache: 'no-store' });
-                if (sampleResponse.ok) {
-                    document.getElementById('debugError').innerText = '⚠️ 未找到后端实时数据，已加载静态示例剧本。';
-                    const script = await sampleResponse.json();
-                    renderScript(script, true);
-                    return;
-                }
+
 
                 const hint = window.location.protocol === 'file:'
                     ? '请使用本地服务器打开页面，例如：python3 -m http.server'
@@ -308,7 +318,16 @@
         }
     }
 
-    function updateSidebarUI() {
+    function updatePlayerUI(ps) {
+    if(!ps) return;
+    for(let id in ps) {
+        if(players[id]) {
+            players[id].hp = ps[id].hp;
+            if(ps[id].weapon && ps[id].weapon !== '拳头') players[id].weapon = ps[id].weapon;
+        }
+    }
+}
+function updateSidebarUI() {
         const listContainer = document.getElementById('playerList');
         listContainer.innerHTML = '';
         for (let id in players) {
@@ -392,7 +411,9 @@
     });
 
     renderPendingCommands();
-    initOfflineMode();
+    document.getElementById('debugError').innerText = '🌐 GitHub Pages前端已加载 | 需在PC运行后端(python3 combined.py)才可驱动';
+    pollHandle = setInterval(fetchLatestScript, 3000);
+    fetchLatestScript();
     updateSidebarUI();
     loop();
 </script>
