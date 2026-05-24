@@ -1,0 +1,19 @@
+{
+  "world_event": "废土平静，风吹过残垣断壁",
+  "characters": {
+    "A": {"dialogue": "冲啊！不能输了！", "hp_change": 0, "action": "attack", "new_weapon": "铁管"},
+    "B": {"dialogue": "先搜刮物资，再说！", "hp_change": 0, "action": "scavenge", "new_weapon": "霰弹枪"},
+    "C": {"dialogue": "冷静观察，这里有伏击。", "hp_change": 0, "action": "hide", "new_weapon": "拳头"},
+    "D": {"dialogue": "我去支援！", "hp_change": 0, "action": "run", "new_weapon": "木盾"},
+    "E": {"dialogue": "这片废土，谁也别想轻松。", "hp_change": 0, "action": "defend", "new_weapon": "拳头"}
+  },
+  "battle_log": [
+    "A 发现了前方的补给箱，立即冲了过去。",
+    "B 在废墟中搜刮到了一把霰弹枪，战斗力提升。",
+    "C 选择隐蔽位置，等待敌人先露头。",
+    "D 向南方移动，尝试支援队友。",
+    "E 站稳阵脚，准备迎战。"
+  ],
+  "game_over": false,
+  "winner": null
+}

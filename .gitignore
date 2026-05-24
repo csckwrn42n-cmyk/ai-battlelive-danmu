@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+
+# Generated game state
+game_script.json
+game_script.json.tmp
+
+# VS Code workspace
+.vscode/

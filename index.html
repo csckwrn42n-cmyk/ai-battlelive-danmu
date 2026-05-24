@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 废土大逃杀 - 终极画面渲染端</title>
+    <style>
+        body {
+            background-color: #1a1a1a; color: #eee;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0;
+        }
+        h1 { color: #ff9800; text-shadow: 2px 2px 0px #000; margin-top: 0; }
+        .container { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+        canvas {
+            background-color: #2c3e50; border: 4px solid #555;
+            box-shadow: 0 0 15px #000; image-rendering: pixelated;
+        }
+        .status-box { width: 280px; min-height: 400px; background: #111;
+            border: 2px solid #444; padding: 15px; display: flex; flex-direction: column;
+        }
+        .history-box, .command-panel {
+            width: 860px; max-width: 100%; background: #111;
+            border: 2px solid #444; padding: 15px; display: flex; flex-direction: column;
+            margin-top: 20px;
+        }
+        .log-title { color: #ff9800; font-weight: bold; border-bottom: 1px solid #333; padding-bottom: 5px; }
+        .event-text { color: #00ffcc; font-weight: bold; margin: 10px 0; min-height: 40px; font-size: 14px;}
+        .player-list { flex-grow: 1; display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+        .player-row { display: flex; justify-content: space-between; font-size: 13px; }
+        .hp-bar-bg { width: 100px; height: 10px; background: #333; border: 1px solid #555; margin-left: 10px; position: relative;}
+        .hp-bar-fill { height: 100%; transition: width 0.5s; }
+        .history-feed {
+            flex-grow: 1; overflow-y: auto; background: #0d1114; border: 1px solid #222;
+            padding: 10px; margin-top: 10px; font-size: 12px; line-height: 1.4; color: #ddd;
+        }
+        .history-item { margin-bottom: 8px; }
+        .command-row { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+        .command-input { flex: 1; padding: 10px 12px; border: 1px solid #555; background: #121212; color: #eee; }
+        .command-button {
+            padding: 10px 16px; border: none; background: #ff9800; color: #111;
+            font-weight: bold; cursor: pointer; transition: opacity 0.2s;
+        }
+        .command-button:hover { opacity: 0.9; }
+        .command-hint { color: #aaa; font-size: 13px; margin-top: 8px; }
+        .pending-commands { margin-top: 10px; display: grid; gap: 4px; }
+        .winner-text { color: #00ff99; font-weight: bold; margin-top: 10px; min-height: 24px; }
+        #debugError { color: #ff3333; font-size: 12px; margin-top: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>☢️ AI 废土大逃杀：LIVE 画面 ☢️</h1>
+    
+    <div class="container">
+        <!-- 游戏画面 -->
+        <canvas id="gameCanvas" width="550" height="400"></canvas>
+        
+        <!-- 右侧大模型状态面板 -->
+        <div class="status-box">
+            <div class="log-title">🛰️ DeepSeek 实时卫星数据</div>
+            <div class="event-text" id="worldEvent">正在链接 Python 服务器...</div>
+            <div class="log-title">🩸 幸存者健康指标</div>
+            <div class="player-list" id="playerList"></div>
+            <div id="debugError"></div>
+        </div>
+    </div>
+
+    <div class="history-box">
+        <div class="log-title">📜 直播弹幕日志</div>
+        <div class="history-feed" id="actionLog">等待剧本数据...</div>
+        <div class="winner-text" id="winNotice"></div>
+    </div>
+
+    <div class="command-panel">
+        <div class="log-title">💬 实时用户指令</div>
+        <div class="command-row">
+            <input id="commandInput" class="command-input" placeholder="示例：A attack D 或 B hide" autocomplete="off" />
+            <button id="sendCommandBtn" class="command-button" type="button">发送</button>
+        </div>
+        <div class="command-hint">输入后该角色本轮动作会优先覆盖 DS 生成指令。格式：角色ID 动作 [目标]</div>
+        <div class="log-title">当前待执行指令</div>
+        <div class="pending-commands" id="pendingCommands">暂无待执行指令</div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // 固定的 5 个 MBTI 角色状态
+    let players = {
+        "A": { id: "A", name: "ESTP", x: 120, y: 150, hp: 100, color: "#ff5555", bubble: "", bTime: 0, targetX: 120, targetY: 150, weapon: "拳头" },
+        "B": { id: "B", name: "INFP", x: 220, y: 250, hp: 100, color: "#5555ff", bubble: "", bTime: 0, targetX: 220, targetY: 250, weapon: "拳头" },
+        "C": { id: "C", name: "INTJ", x: 350, y: 120, hp: 100, color: "#55ff55", bubble: "", bTime: 0, targetX: 350, targetY: 120, weapon: "拳头" },
+        "D": { id: "D", name: "ENFP", x: 420, y: 280, hp: 100, color: "#ffff55", bubble: "", bTime: 0, targetX: 420, targetY: 280, weapon: "拳头" },
+        "E": { id: "E", name: "ISTJ", x: 270, y: 180, hp: 100, color: "#ff55ff", bubble: "", bTime: 0, targetX: 270, targetY: 180, weapon: "拳头" }
+    };
+    
+    let particles = [];
+    let actionHistory = [];
+    let pendingCommands = {};
+    let pollHandle = null;
+
+    function parseUserCommand(raw) {
+        const txt = raw.trim();
+        if (!txt) return null;
+        const match = txt.match(/^([A-E])\s+([a-zA-Z_]+)(?:\s+([A-E]))?$/i);
+        if (!match) return null;
+        const roleId = match[1].toUpperCase();
+        const action = match[2].toLowerCase();
+        const target = match[3] ? match[3].toUpperCase() : null;
+        const allowed = ['attack', 'scavenge', 'hide', 'run', 'defend', 'none'];
+        if (!allowed.includes(action)) return null;
+        return { roleId, action, target };
+    }
+
+    function renderPendingCommands() {
+        const container = document.getElementById('pendingCommands');
+        if (!container) return;
+        const lines = Object.values(pendingCommands).map(cmd => {
+            return `<div class="history-item">🎯 ${cmd.roleId} ${cmd.action}${cmd.target ? ' ' + cmd.target : ''}</div>`;
+        });
+        container.innerHTML = lines.length > 0 ? lines.join('') : '<div class="history-item">暂无待执行指令</div>';
+    }
+
+    function submitUserCommand(commandText) {
+        const errorBox = document.getElementById('debugError');
+        const parsed = parseUserCommand(commandText);
+        if (!parsed) {
+            appendHistoryItems(['❌ 指令格式错误，正确写法：A attack D 或 B hide']);
+            errorBox.innerText = '请输入合法指令：角色ID 动作 [目标]';
+            return;
+        }
+        pendingCommands[parsed.roleId] = parsed;
+        appendHistoryItems([`🎤 用户指令：${parsed.roleId} ${parsed.action}${parsed.target ? ' ' + parsed.target : ''}`]);
+        renderPendingCommands();
+        document.getElementById('commandInput').value = '';
+        errorBox.innerText = '✅ 已记录用户指令，本轮将优先执行';
+    }
+
+    function applyCommandOverride(data, id) {
+        const override = pendingCommands[id];
+        if (!override) return data;
+        data = { ...data, action: override.action };
+        if (!data.dialogue) {
+            data.dialogue = `执行用户指令：${override.action}${override.target ? ' ' + override.target : ''}`;
+        }
+        if (override.target) {
+            data.target = override.target;
+        }
+        delete pendingCommands[id];
+        renderPendingCommands();
+        return data;
+    }
+
+    function appendHistoryItems(lines) {
+        if (!lines || lines.length === 0) return;
+        actionHistory = actionHistory.concat(lines.filter(Boolean));
+        if (actionHistory.length > 30) actionHistory = actionHistory.slice(-30);
+        document.getElementById('actionLog').innerHTML = actionHistory
+            .map(line => `<div class="history-item">${line}</div>`)
+            .join('');
+    }
+
+    function renderWinner(winnerName) {
+        const notice = document.getElementById('winNotice');
+        if (!winnerName) {
+            notice.innerText = '';
+            return;
+        }
+        notice.innerText = `🏆 ${winnerName} 获得胜利！直播结束。`;
+    }
+
+    function stopPolling() {
+        if (pollHandle) {
+            clearInterval(pollHandle);
+            pollHandle = null;
+        }
+    }
+
+    function buildSingleLogEntry(id, p, data) {
+        const hpChange = data.hp_change || 0;
+        const startHp = Math.max(0, p.hp - hpChange);
+        let action = data.action || '动向不明';
+        if (data.target) {
+            action += ` ${data.target}`;
+        }
+        let weaponText = '';
+        if (data.new_weapon && data.new_weapon !== '无' && data.new_weapon !== '不变') {
+            weaponText = `，装备了 ${data.new_weapon}`;
+        }
+        let result = `【${id} ${p.name}】${action}${weaponText}，HP ${startHp} → ${p.hp}`;
+        if (data.dialogue) {
+            result += `，说:「${data.dialogue}」`;
+        }
+        if (p.hp <= 0 && startHp > 0) {
+            result += '，已经被淘汰';
+        }
+        return result;
+    }
+
+    function renderScript(script, isSample = false) {
+        if (script.world_event) {
+            document.getElementById('worldEvent').innerText = script.world_event;
+            appendHistoryItems([`🌍 全局大事件：${script.world_event}`]);
+        }
+
+        const chars = script.characters;
+        if (!chars) return;
+
+        let currentLogs = [];
+        for (let id in chars) {
+            if (!players[id]) continue;
+            let p = players[id];
+            let data = applyCommandOverride(chars[id], id);
+            let previousHp = p.hp;
+
+            if (data.hp_change !== undefined) {
+                p.hp = Math.max(0, p.hp + data.hp_change);
+            }
+            if (data.new_weapon && data.new_weapon !== '无' && data.new_weapon !== '不变') {
+                p.weapon = data.new_weapon;
+            }
+            if (data.dialogue && data.dialogue !== '...') {
+                p.bubble = data.dialogue;
+                p.bTime = 120;
+            }
+            if (p.hp <= 0 || data.action === 'dead') {
+                p.hp = 0;
+            } else if (data.action === 'attack') {
+                let targets = [];
+                if (data.target && players[data.target] && players[data.target].hp > 0 && data.target !== id) {
+                    targets = [players[data.target]];
+                } else {
+                    targets = Object.values(players).filter(x => x.id !== id && x.hp > 0);
+                }
+                if (targets.length > 0) {
+                    let t = targets[Math.floor(Math.random() * targets.length)];
+                    p.targetX = t.x; p.targetY = t.y;
+                    createParticles(t.x, t.y, p.color);
+                }
+            } else if (['hide', 'scavenge', 'run', 'defend'].includes(data.action)) {
+                p.targetX = Math.random() * 400 + 50;
+                p.targetY = Math.random() * 260 + 50;
+            }
+
+            currentLogs.push(buildSingleLogEntry(id, p, data));
+        }
+
+        if (script.battle_log && Array.isArray(script.battle_log)) {
+            appendHistoryItems(script.battle_log.map(line => `🧾 ${line}`));
+        } else {
+            appendHistoryItems(currentLogs);
+        }
+
+        updateSidebarUI();
+
+        const alive = Object.values(players).filter(p => p.hp > 0);
+        if (alive.length <= 1) {
+            const winnerName = alive.length === 1 ? `${alive[0].id} ${alive[0].name}` : '无人幸存';
+            renderWinner(winnerName);
+            stopPolling();
+            if (!script.game_over) {
+                appendHistoryItems(['⚠️ 检测到决赛结果，但后端未标记 game_over，已停止轮询。']);
+            }
+        }
+    }
+
+    async function fetchLatestScript() {
+        try {
+            const scriptUrl = new URL('game_script.json', window.location.href);
+            let response = await fetch(`${scriptUrl.href}?nocache=${Math.random()}`, { cache: 'no-store' });
+
+            if (!response.ok) {
+                const sampleUrl = new URL('game_script.sample.json', window.location.href);
+                const sampleResponse = await fetch(`${sampleUrl.href}?nocache=${Math.random()}`, { cache: 'no-store' });
+                if (sampleResponse.ok) {
+                    document.getElementById('debugError').innerText = '⚠️ 未找到后端实时数据，已加载静态示例剧本。';
+                    const script = await sampleResponse.json();
+                    renderScript(script, true);
+                    return;
+                }
+
+                const hint = window.location.protocol === 'file:'
+                    ? '请使用本地服务器打开页面，例如：python3 -m http.server'
+                    : '请确认服务器在正确目录下运行';
+                document.getElementById('debugError').innerText = `❌ 找不到 game_script.json，${hint}。`;
+                return;
+            }
+
+            const script = await response.json();
+            document.getElementById('debugError').innerText = '✅ 卫星信号稳定，剧本同步中...';
+            renderScript(script, false);
+        } catch (e) {
+            let message = e.message || String(e);
+            if (window.location.protocol === 'file:') {
+                message = '本地打开模式可能被浏览器拦截，请改用本地服务器，如：python3 -m http.server';
+            }
+            document.getElementById('debugError').innerText = `❌ 解析 JSON 失败，可能文件正在被写入或加载失败: ${message}`;
+        }
+    }
+
+    function updateSidebarUI() {
+        const listContainer = document.getElementById('playerList');
+        listContainer.innerHTML = '';
+        for (let id in players) {
+            let p = players[id];
+            let row = document.createElement('div');
+            row.className = 'player-row';
+            let statusText = p.hp <= 0 ? '💀 死亡' : `HP: ${p.hp} [${p.weapon}]`;
+            row.innerHTML = `
+                <span style="color:${p.color}; text-decoration: ${p.hp<=0?'line-through':'none'}">${p.name} (${statusText})</span>
+                <div class="hp-bar-bg"><div class="hp-bar-fill" style="width: ${p.hp}%; background:${p.hp > 30 ? '#0f0':'#f00'}"></div></div>
+            `;
+            listContainer.appendChild(row);
+        }
+    }
+
+    function update() {
+        for (let id in players) {
+            let p = players[id];
+            if (p.hp <= 0) continue;
+            p.x += (p.targetX - p.x) * 0.05;
+            p.y += (p.targetY - p.y) * 0.05;
+        }
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let pt = particles[i];
+            pt.x += pt.vx; pt.y += pt.vy; pt.life--;
+            if (pt.life <= 0) particles.splice(i, 1);
+        }
+    }
+
+    function draw() {
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        for (let id in players) {
+            let p = players[id];
+            if (p.hp <= 0) {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.fillRect(p.x - 2, p.y - 10, 4, 16);
+                ctx.fillRect(p.x - 7, p.y - 5, 14, 4);
+                continue;
+            }
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x - 12, p.y - 12, 24, 24);
+            ctx.fillStyle = '#fff';
+            ctx.font = '11px Courier';
+            ctx.fillText(p.name, p.x - 12, p.y - 18);
+            if (p.bTime > 0 && p.bubble) {
+                ctx.font = '12px "Microsoft YaHei", sans-serif';
+                let txtW = ctx.measureText(p.bubble).width;
+                ctx.fillStyle = 'rgba(255,255,255,0.95)';
+                ctx.fillRect(p.x - txtW / 2 - 6, p.y - 52, txtW + 12, 20);
+                ctx.fillStyle = '#000';
+                ctx.fillText(p.bubble, p.x - txtW / 2, p.y - 38);
+                p.bTime--;
+            }
+        }
+
+        particles.forEach(pt => {
+            ctx.fillStyle = pt.color;
+            ctx.globalAlpha = pt.life / 20;
+            ctx.fillRect(pt.x, pt.y, 4, 4);
+            ctx.globalAlpha = 1;
+        });
+    }
+
+    function createParticles(x, y, color) {
+        for (let i = 0; i < 10; i++) {
+            particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8, life: 20, color: color });
+        }
+    }
+
+    function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+    document.getElementById('sendCommandBtn').addEventListener('click', () => {
+        submitUserCommand(document.getElementById('commandInput').value);
+    });
+    document.getElementById('commandInput').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitUserCommand(event.target.value);
+        }
+    });
+
+    renderPendingCommands();
+    pollHandle = setInterval(fetchLatestScript, 5000);
+    fetchLatestScript();
+    updateSidebarUI();
+    loop();
+</script>
+</body>
+</html>
